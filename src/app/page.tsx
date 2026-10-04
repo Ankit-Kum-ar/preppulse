@@ -1,67 +1,250 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect } from "react";
+import confetti from "canvas-confetti";
+import Navbar from "@/components/layout/Navbar";
+import SetupCard from "@/components/interview/SetupCard";
+import InterviewWorkspace from "@/components/interview/InterviewWorkspace";
+import FinalDebriefCard from "@/components/interview/FinalDebriefCard";
+import PastSessionsView from "@/components/interview/PastSessionsView";
+import { TurnEvaluation, FinalReport, PastSessionItem } from "@/types/interview";
 
 export default function Home() {
+  const [screen, setScreen] = useState<"setup" | "interview" | "final">("setup");
+  const [loading, setLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [pastSessions, setPastSessions] = useState<PastSessionItem[]>([]);
+
+  // Setup state
+  const [friendName, setFriendName] = useState("");
+  const [targetRole, setTargetRole] = useState("Full-Stack Web Developer");
+  const [isCustomRole, setIsCustomRole] = useState(false);
+  const [customRoleInput, setCustomRoleInput] = useState("");
+  const [experienceLevel, setExperienceLevel] = useState("Mid-Level");
+
+  // Interview state
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [currentTurn, setCurrentTurn] = useState(1);
+  const [question, setQuestion] = useState("");
+  const [isCodeQuestion, setIsCodeQuestion] = useState(false);
+  const [answer, setAnswer] = useState("");
+  const [evaluation, setEvaluation] = useState<TurnEvaluation | null>(null);
+  const [finalReport, setFinalReport] = useState<FinalReport | null>(null);
+
+  // Live Stopwatch
+  const [secondsElapsed, setSecondsElapsed] = useState(0);
+  const [timerActive, setTimerActive] = useState(false);
+
+  useEffect(() => {
+    let interval: any = null;
+    if (timerActive) {
+      interval = setInterval(() => {
+        setSecondsElapsed((prev) => prev + 1);
+      }, 1000);
+    } else {
+      clearInterval(interval);
+    }
+    return () => clearInterval(interval);
+  }, [timerActive]);
+
+  const formatTimer = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const res = await fetch("/api/interview/history");
+      const data = await res.json();
+      if (data.success) {
+        setPastSessions(data.sessions || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch past sessions:", e);
+    }
+  };
+
+  const selectedRoleString = isCustomRole ? customRoleInput : targetRole;
+
+  const handleResetToSetup = () => {
+    setScreen("setup");
+    setShowHistory(false);
+    setSessionId(null);
+    setEvaluation(null);
+    setFinalReport(null);
+    setAnswer("");
+    setSecondsElapsed(0);
+    setTimerActive(false);
+  };
+
+  async function handleStart() {
+    const activeRole = selectedRoleString.trim();
+    if (!friendName.trim() || !activeRole) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/interview/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          friendName: friendName.trim(),
+          targetRole: activeRole,
+          experienceLevel,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSessionId(data.sessionId);
+        setQuestion(data.question);
+        setIsCodeQuestion(Boolean(data.isCodeQuestion));
+        setCurrentTurn(1);
+        setShowHistory(false);
+        setScreen("interview");
+        setSecondsElapsed(0);
+        setTimerActive(true);
+      }
+    } catch (err) {
+      console.error("Failed to start session:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSubmitTurn() {
+    if (!answer.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/interview/turn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          turn: currentTurn,
+          question,
+          answer,
+          targetRole: selectedRoleString,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEvaluation(data.evaluation);
+      }
+    } catch (err) {
+      console.error("Failed to submit answer:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleNextRound() {
+    if (currentTurn >= 3) {
+      setLoading(true);
+      setTimerActive(false);
+      try {
+        const res = await fetch("/api/interview/finish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setFinalReport(data);
+          setScreen("final");
+          confetti({
+            particleCount: 140,
+            spread: 90,
+            origin: { y: 0.6 },
+            colors: ["#FF6B2C", "#FFA26B", "#FFFFFF", "#141619", "#38BDF8"],
+          });
+        }
+      } catch (err) {
+        console.error("Failed to finish session:", err);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      if (evaluation?.next_question) {
+        setQuestion(evaluation.next_question);
+        setIsCodeQuestion(Boolean(evaluation.isCodeQuestion));
+      }
+      setCurrentTurn((prev) => prev + 1);
+      setAnswer("");
+      setEvaluation(null);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="min-h-screen bg-background text-foreground flex flex-col transition-colors duration-200">
+      {/* Top Floating Sticky Navbar - Only shown during initial setup */}
+      {screen === "setup" && (
+        <Navbar
+          showHistory={showHistory}
+          onOpenHistory={() => {
+            setShowHistory(!showHistory);
+            if (!showHistory) fetchHistory();
+          }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+      )}
+
+      {/* Main Workspace Area */}
+      <main
+        className={`flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 ${
+          screen === "setup" ? "pt-28 sm:pt-36" : "pt-8 sm:pt-12"
+        } pb-24 flex flex-col items-center`}
+      >
+        <div className="w-full space-y-6">
+          {/* PAST SESSIONS MODAL/VIEW */}
+          {showHistory && screen === "setup" && (
+            <PastSessionsView pastSessions={pastSessions} />
+          )}
+
+          {/* 1. Setup Screen */}
+          {!showHistory && screen === "setup" && (
+            <SetupCard
+              friendName={friendName}
+              setFriendName={setFriendName}
+              targetRole={targetRole}
+              setTargetRole={setTargetRole}
+              isCustomRole={isCustomRole}
+              setIsCustomRole={setIsCustomRole}
+              customRoleInput={customRoleInput}
+              setCustomRoleInput={setCustomRoleInput}
+              experienceLevel={experienceLevel}
+              setExperienceLevel={setExperienceLevel}
+              loading={loading}
+              onStart={handleStart}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          )}
+
+          {/* 2. Active Interview Screen */}
+          {screen === "interview" && (
+            <InterviewWorkspace
+              currentTurn={currentTurn}
+              question={question}
+              isCodeQuestion={isCodeQuestion}
+              answer={answer}
+              setAnswer={setAnswer}
+              selectedRoleString={selectedRoleString}
+              experienceLevel={experienceLevel}
+              secondsElapsed={secondsElapsed}
+              formatTimer={formatTimer}
+              loading={loading}
+              evaluation={evaluation}
+              onSubmitTurn={handleSubmitTurn}
+              onNextRound={handleNextRound}
+            />
+          )}
+
+          {/* 3. Final Debrief Summary Screen */}
+          {screen === "final" && finalReport && (
+            <FinalDebriefCard
+              friendName={friendName}
+              selectedRoleString={selectedRoleString}
+              experienceLevel={experienceLevel}
+              finalReport={finalReport}
+              onReset={handleResetToSetup}
+            />
+          )}
         </div>
       </main>
     </div>
