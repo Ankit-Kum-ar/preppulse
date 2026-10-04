@@ -1,6 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/Ankit-Kum-ar/preppulse/main/public/favicon.ico" alt="PrepPulse Logo" width="64" height="64" />
-  <h1>PrepPulse</h1>
+  <h1>⚡ PrepPulse</h1>
   <p><strong>Adaptive 3-Round AI Technical Mock Interviewer powered by Google Gemma 2 27B & MongoDB Atlas</strong></p>
 
   <p>
